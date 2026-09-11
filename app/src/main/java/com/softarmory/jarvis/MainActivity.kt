@@ -33,7 +33,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this) { status -> if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault() }
-        setContent { JarvisScreen(::listen, ::askAi) }
+        setContent { JarvisScreen(::listen, ::askAi, ::openOpenRouterKeys) }
     }
 
     private fun listen() {
@@ -72,18 +72,32 @@ class MainActivity : ComponentActivity() {
 
     private fun askAi(text: String, onResult: (String) -> Unit = ::speak) {
         CoroutineScope(Dispatchers.IO).launch {
-            val answer = try { JarvisApi.chat(text) } catch (e: Exception) { "Backend unavailable. Configure the Railway URL." }
-            runOnUiThread { onResult(answer) }
+            try {
+                val answer = JarvisApi.chat(text)
+                runOnUiThread { onResult(answer) }
+            } catch (e: OpenRouterSetupRequired) {
+                runOnUiThread {
+                    onResult("No OpenRouter API key is configured. Opening the key page.")
+                    open(e.setupUrl)
+                }
+            } catch (e: Exception) {
+                runOnUiThread { onResult("JARVIS backend error: ${e.message ?: "unknown error"}") }
+            }
         }
     }
 
+    private fun openOpenRouterKeys() = open(JarvisApi.OPENROUTER_KEYS_URL)
     private fun open(url: String) = startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     private fun speak(text: String) { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis") }
     override fun onDestroy() { recognizer?.destroy(); tts?.shutdown(); super.onDestroy() }
 }
 
 @Composable
-private fun JarvisScreen(onListen: () -> Unit, onAi: (String, (String) -> Unit) -> Unit) {
+private fun JarvisScreen(
+    onListen: () -> Unit,
+    onAi: (String, (String) -> Unit) -> Unit,
+    onOpenKeys: () -> Unit,
+) {
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     val messages = remember { mutableStateListOf("JARVIS online.") }
@@ -91,7 +105,7 @@ private fun JarvisScreen(onListen: () -> Unit, onAi: (String, (String) -> Unit) 
         Scaffold { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("JARVIS", style = MaterialTheme.typography.headlineLarge)
-                Text(if (busy) "Thinking…" else "Android AI Assistant")
+                Text(if (busy) "Thinking…" else "Android AI Assistant • OpenRouter Free")
                 Spacer(Modifier.height(20.dp))
                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) { items(messages) { Text(it, Modifier.padding(8.dp)) } }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -105,6 +119,8 @@ private fun JarvisScreen(onListen: () -> Unit, onAi: (String, (String) -> Unit) 
                 }
                 Spacer(Modifier.height(10.dp))
                 Button(onClick = onListen, modifier = Modifier.fillMaxWidth()) { Text("🎙 Speak to JARVIS") }
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = onOpenKeys, modifier = Modifier.fillMaxWidth()) { Text("🔑 Get OpenRouter API Key") }
             }
         }
     }
