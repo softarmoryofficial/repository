@@ -1,7 +1,20 @@
-plugins { id("com.android.application"); id("org.jetbrains.kotlin.android"); id("org.jetbrains.kotlin.plugin.compose") }
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
 
-android { namespace = "com.softarmory.jarvis"; compileSdk = 36
-    defaultConfig { applicationId = "com.softarmory.jarvis"; minSdk = 26; targetSdk = 36; versionCode = 1; versionName = "1.0" }
+android {
+    namespace = "com.softarmory.jarvis"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "com.softarmory.jarvis"
+        minSdk = 26
+        targetSdk = 36
+        versionCode = 1
+        versionName = "1.0"
+    }
 }
 
 kotlin { jvmToolchain(17) }
@@ -12,4 +25,5 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
 }
