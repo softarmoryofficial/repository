@@ -20,36 +20,31 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private var recognizer: SpeechRecognizer? = null
     private var tts: TextToSpeech? = null
-    private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startListening()
-    }
+    private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { if (it) startListening() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         tts = TextToSpeech(this) { status -> if (status == TextToSpeech.SUCCESS) tts?.language = Locale.getDefault() }
-        setContent { JarvisScreen(::listen, ::speak, ::runLocalCommand) }
+        setContent { JarvisScreen(::listen, ::askAi) }
     }
 
     private fun listen() {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestMic.launch(Manifest.permission.RECORD_AUDIO); return
-        }
-        startListening()
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) requestMic.launch(Manifest.permission.RECORD_AUDIO) else startListening()
     }
 
     private fun startListening() {
         recognizer?.destroy()
         recognizer = SpeechRecognizer.createSpeechRecognizer(this).apply {
             setRecognitionListener(object : RecognitionListener {
-                override fun onResults(results: Bundle) {
-                    val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
-                    handleCommand(text)
-                }
+                override fun onResults(results: Bundle) { results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.let(::dispatch) }
                 override fun onError(error: Int) = Unit
                 override fun onReadyForSpeech(params: Bundle) = Unit
                 override fun onBeginningOfSpeech() = Unit
@@ -66,41 +61,50 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun handleCommand(text: String) {
+    private fun dispatch(text: String) {
         val command = text.lowercase(Locale.getDefault())
-        if (command.contains("open youtube")) { runLocalCommand("youtube"); return }
-        if (command.contains("open google")) { runLocalCommand("google"); return }
-        speak("I heard: $text. Connect the backend to enable full AI reasoning.")
+        when {
+            command.contains("open youtube") -> open("https://youtube.com")
+            command.contains("open google") -> open("https://google.com")
+            else -> askAi(text, ::speak)
+        }
     }
 
-    private fun runLocalCommand(target: String) {
-        val url = when (target) { "youtube" -> "https://youtube.com"; else -> "https://google.com" }
-        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+    private fun askAi(text: String, onResult: (String) -> Unit = ::speak) {
+        CoroutineScope(Dispatchers.IO).launch {
+            val answer = try { JarvisApi.chat(text) } catch (e: Exception) { "Backend unavailable. Configure the Railway URL." }
+            runOnUiThread { onResult(answer) }
+        }
     }
 
+    private fun open(url: String) = startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
     private fun speak(text: String) { tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "jarvis") }
-
     override fun onDestroy() { recognizer?.destroy(); tts?.shutdown(); super.onDestroy() }
 }
 
 @Composable
-private fun JarvisScreen(onListen: () -> Unit, onSpeak: (String) -> Unit, onLocal: (String) -> Unit) {
+private fun JarvisScreen(onListen: () -> Unit, onAi: (String, (String) -> Unit) -> Unit) {
     var input by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
     val messages = remember { mutableStateListOf("JARVIS online.") }
     MaterialTheme {
         Scaffold { padding ->
             Column(Modifier.fillMaxSize().padding(padding).padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("JARVIS", style = MaterialTheme.typography.headlineLarge)
-                Text("Android AI Assistant", style = MaterialTheme.typography.titleMedium)
+                Text(if (busy) "Thinking…" else "Android AI Assistant")
                 Spacer(Modifier.height(20.dp))
                 LazyColumn(Modifier.weight(1f).fillMaxWidth()) { items(messages) { Text(it, Modifier.padding(8.dp)) } }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), label = { Text("Command") })
                     Spacer(Modifier.width(8.dp))
-                    Button(onClick = { if (input.isNotBlank()) { messages += "You: $input"; onSpeak("I heard: $input"); input = "" } }) { Text("Send") }
+                    Button(enabled = !busy, onClick = {
+                        val text = input.trim(); if (text.isEmpty()) return@Button
+                        messages += "You: $text"; input = ""; busy = true
+                        onAi(text) { answer -> messages += "JARVIS: $answer"; busy = false }
+                    }) { Text("Send") }
                 }
                 Spacer(Modifier.height(10.dp))
-                Button(onClick = { onListen() }, modifier = Modifier.fillMaxWidth()) { Text("🎙 Speak to JARVIS") }
+                Button(onClick = onListen, modifier = Modifier.fillMaxWidth()) { Text("🎙 Speak to JARVIS") }
             }
         }
     }
